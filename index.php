@@ -3,7 +3,7 @@
 	Simple Accounting Book - 
 		One file house spending accounting program
 
-	@version 0.2.0 Beta
+	@version 0.3.0 Beta
 
 	@Feture:
 			1,accounting book
@@ -32,7 +32,7 @@ date_default_timezone_set('America/New_york');
 
 //system info
 define('SAB_NAME','Simple Accounting Book');
-define("SAB_VERSION",'0.2.0');
+define("SAB_VERSION",'0.3.0');
 define('SAB_RELASE_STATUS','Beta');
 
 //global switch for site
@@ -41,6 +41,9 @@ define('SAB_SITE_IS_UP',true);
 //global user configuration
 $g_config = array(
 	'account'=>array(
+		/**
+		* Warning Do not Use ':' in user name
+		**/
 		'huangwc94'=>array(
 			'passwd'=>'17126huang',
 			'name'  =>'Weicheng Huang',
@@ -55,7 +58,7 @@ $g_config = array(
 			),
 		'6142148222'=>array(
 			'passwd'=>'5661466',
-			'name'  =>'Zhongrong Zhuang',
+			'name'  =>'Zongrong Zhuang',
 			'phone' =>'614-214-8222',
 			'account'=>'6142148222'
 			),
@@ -77,7 +80,7 @@ $g_config = array(
 		)
 	);
 
-
+define("NUM_OF_USR",count($g_config['account']));
 //================================================================
 /*
 */
@@ -117,32 +120,7 @@ function main(){
 
 function proc_main($user){
 	$data = array();
-	$detail=array(
-		array(
-			'id'=>1,
-			'user'=>'Weicheng Huang',
-			'amount'=>34.20,
-			'tag'  =>'Food',
-			'description'=>'CAM',
-			'create_time'=>'2015-3-12'
-			),
-		array(
-			'id'=>2,
-			'user'=>'Weicheng Huang',
-			'amount'=>324.20,
-			'tag'  =>'Piano',
-			'description'=>'Music Ground',
-			'create_time'=>'2015-3-11'
-			),
-		array(
-			'id'=>3,
-			'user'=>'Weicheng Huang',
-			'amount'=>12.20,
-			'tag'  =>'Food',
-			'description'=>'Walmart',
-			'create_time'=>'2015-3-10'
-			)
-		);
+	global $g_config;
 	$deleteUrl = ajaxLink('delete');
 	$clearUrl  = ajaxLink('clearbalance');
 
@@ -272,12 +250,23 @@ EOF;
 		$data['notice'] = array('type'=>'success','message'=>'Add data successfully');
 	}
 	if(isset($_POST['amount'])&&isset($_POST['description'])){
+		$payee = [];
+		foreach($g_config['account'] as $u){
+			$payee_name = 'payee_'.$u['account'];
+			if(isset($_POST[$payee_name])){
+				$payee[] = $u['account'];
+			}
+		}
+		if(count($payee) == NUM_OF_USR){
+			$payee = [];
+		}
 		$form['amount'] = safe($_POST['amount']);
 		$form['description']= safe($_POST['description']);
 		if(!is_numeric($form['amount'])){
 			$data['notice'] = array('type'=>'danger','message'=>'The amount is not a number');
 		}else{
-			if(add($form['amount'],$form['description'])){
+
+			if(add($form['amount'],$form['description'],join(':', $payee))){
 				header('Location: index.php?status=ok');
 			}else{
 				$data['notice'] = array('type'=>'danger','message'=>'Database error');
@@ -295,7 +284,7 @@ EOF;
 	}
 	
 	
-	global $g_config;
+	
 	$data['detail'] = get_list($data['current_offset'],$data['limit'] );
 	
 
@@ -304,12 +293,12 @@ EOF;
 	foreach ($g_config['account'] as $key => $value) {
 		$balance = get_user_current_balance($key);
 
-		$data['current_balance_user'][$key]['balance'] = $balance[0];
+		$data['current_balance_user'][$key]['balance'] = $balance;
 		$data['current_balance_user'][$key]['name'] = $g_config['account'][$key]['name'];
 		$data['current_balance_user'][$key]['phone'] = $g_config['account'][$key]['phone'];
-		$data['current_balance'] = $balance[1];
+		
 	}
-
+	$data['current_balance'] = get_total_current_balance();
 
 
 
@@ -385,7 +374,7 @@ function user(){
 function get_list($offset,$limit){
 	$con = get_con();
 	global $g_config;
-	$re  = mysqli_query($con,"SELECT * FROM `".$g_config['database']['db_prefix']."accounting` ORDER BY create_time DESC LIMIT ".$offset.",".$limit);
+	$re  = mysqli_query($con,"SELECT * FROM `".$g_config['database']['db_prefix']."accounting` ORDER BY create_time DESC,id DESC LIMIT ".$offset.",".$limit);
 	$return = array();
 	while($tmp = mysqli_fetch_assoc($re)){
 		$return[] = $tmp;
@@ -395,17 +384,35 @@ function get_list($offset,$limit){
 function get_user_current_balance($name){
 	$con = get_con();
 	global $g_config;
-	$re  = mysqli_query($con,"SELECT `amount`,`user`  FROM `".$g_config['database']['db_prefix']."accounting` WHERE is_finished='0'");
+	$re  = mysqli_query($con,"SELECT `amount`,`user`,`payee`  FROM `".$g_config['database']['db_prefix']."accounting` WHERE is_finished='0'");
 	$total_user = 0;
 	$total = 0;
 	while($tmp = mysqli_fetch_assoc($re)){
 		if($tmp['user']==$name){
 			$total_user += $tmp['amount'];
 		}
-			
+
+		if(strpos($tmp['payee'],$name) !== false || $tmp['payee']==''){
+			if($tmp['payee']==''){
+				$num = NUM_OF_USR;
+			}else{
+				$num = count(explode(":",$tmp['payee']));
+			}
+			$total +=$tmp['amount']/$num;
+		}
+	}
+	return $total - $total_user ;
+}
+function get_total_current_balance(){
+	$con = get_con();
+	global $g_config;
+	$re  = mysqli_query($con,"SELECT `amount`  FROM `".$g_config['database']['db_prefix']."accounting` WHERE is_finished='0'");
+	$total_user = 0;
+	$total = 0;
+	while($tmp = mysqli_fetch_assoc($re)){
 		$total +=$tmp['amount'];
 	}
-	return array($total/count($g_config['account']) - $total_user ,$total);
+	return $total ;
 }
 function get_chart_data(){
 	
@@ -421,7 +428,7 @@ function get_chart_data(){
 			4=>'Apr',
 			5=>'May',
 			6=>'Jue',
-			7=>'Jun',
+			7=>'Jul',
 			8=>'Aug',
 			9=>'Sept',
 			10=>'Oct',
@@ -430,14 +437,14 @@ function get_chart_data(){
 		);
 
 	$this_week = array(
-		date('Y-m-d',strtotime('this Monday')),
-		date('Y-m-d',strtotime('this Tuesday')),
+		date('Y-m-d',strtotime('last monday')),
+		date('Y-m-d',strtotime('last tuesday')),
 		date('Y-m-d',strtotime('this wednesday')),
 		date('Y-m-d',strtotime('this thursday')),
 		date('Y-m-d',strtotime('this friday')),
 		date('Y-m-d',strtotime('this saturday')),
 		date('Y-m-d',strtotime('this sunday')));
-
+	var_dump($this_week);
 	$con = get_con();
 	$re  = mysqli_query($con,"SELECT `amount`,`create_time`  FROM `".$g_config['database']['db_prefix']."accounting` WHERE year(create_time) =" .$this_year);
 	
@@ -489,14 +496,14 @@ function get_chart_data(){
 	$return_['year']  = array_values($return_['year']);
 	return $return_;
 }
-function add($amount,$description){
+function add($amount,$description,$payee){
 	$user = user();
 	global $g_config;
 	if($user){
 		$con = get_con();
 		$user_account = $user['account'];
 
-		if(mysqli_query($con,"INSERT INTO `".$g_config['database']['db_prefix']."accounting` (`id`, `is_finished`, `user`, `amount`, `create_time`, `description`) VALUES (NULL, '0', '".$user_account."', '".$amount."', CURRENT_DATE, '".$description."')")){
+		if(mysqli_query($con,"INSERT INTO `".$g_config['database']['db_prefix']."accounting` (`id`, `is_finished`, `user`,`payee` ,`amount`, `create_time`, `description`) VALUES (NULL, '0', '".$user_account."', '".$payee."','".$amount."', CURRENT_DATE, '".$description."')")){
 			return true;
 		}
 	}
@@ -717,11 +724,12 @@ function renderMain($data = [],$script=''){
             <span class="icon-bar"></span>
             <span class="icon-bar"></span>
           </button>
-          <a class="navbar-brand" href="#"><?php echo $g_config['house']['name']?></a>
+          <a class="navbar-brand" href="index.php"><?php echo $g_config['house']['name']?></a>
         </div>
         <div id="navbar" class="navbar-collapse collapse">
           
           <ul class="nav navbar-nav navbar-right">
+          	<li><a>Hi,<?php echo $data['user']['name']?></a></li>
             <li><a href="<?php echo ajaxLink('logout')?>">Logout</a></li>
           </ul>
         </div><!--/.nav-collapse -->
@@ -785,7 +793,17 @@ function renderMain($data = [],$script=''){
       <input type="text" class="form-control" name="description" autocomplete="off" value="<?php echo $data['form']['description']?>">
     </div>
   </div>
-
+  <div class="form-group">
+    <label  class="col-sm-2 control-label">Who own</label>
+    <div class="col-sm-6">
+	    	<?php foreach($g_config['account'] as $u):?>
+	    <label>
+	      <input type="checkbox" name="payee_<?php echo $u['account'] ?>" <?php if($data['user']['name']==$u['name'])echo 'checked="true"'?> ><?php echo $u['name']?>
+	    </label>
+	       <?php endforeach;?>
+ 	</div>
+  </div>
+  
 
   <div class="form-group">
     <div class="col-sm-offset-2 col-sm-10">
@@ -855,6 +873,7 @@ function renderMain($data = [],$script=''){
         <tr>
          
           <th>User</th>
+          <th>Payee</th>
           <th>Amount</th>
           <th>Description</th>
           <th>Create Time</th>
@@ -873,6 +892,22 @@ function renderMain($data = [],$script=''){
         <?php endif;?>
         	
         	<td><?php echo $g_config['account'][$k['user']]['name'] ?></td>
+        	<td>
+        	<?php 
+        		if($k['payee']==''){
+        			echo "<span class='label label-danger'>Everyone</span>";
+        		}else{
+        			$pays = explode(":",$k['payee']);
+        			foreach($pays as $p){
+        				if(array_key_exists($p,$g_config['account']))
+        					echo '<span class="label label-success">'.$g_config['account'][$p]['name'].'</span>  ';
+        				else
+        					echo "<span class='label label-default'>Unknown User</span>";
+        			}
+        		}
+
+        		?>
+        	</td>
         	<td>$<?php echo $k['amount'] ?></td>
         	<td><?php echo $k['description'] ?></td>
         	<td><?php echo $k['create_time']. " - ".date("D",strtotime($k['create_time'])) ?></td>
